@@ -11,6 +11,9 @@ from sqlalchemy import create_engine, text
 import pandas as pd 
 import pygsheets
 from datetime import datetime, timedelta
+import logging 
+
+# logger = logging.getLogger(__name__)
 
 # Loading credentials from .env file 
 load_dotenv()
@@ -62,9 +65,16 @@ def connect_to_qualer_db():
         Updates value of Global variable 'QUALER_DB_ENGINE'
         Returns -> None 
     '''
-    global QUALER_DB_ENGINE 
-    QUALER_DB_ENGINE = create_engine(f"postgresql://{DATABASE_WRITE_USER}:{DATABASE_WRITE_PASSWORD}@{DATABASE_HOST}:{DATABASE_PORT}/{DATABASE_NAME}") 
-    
+    logging.info('Connecting to DB.')
+    try: 
+        global QUALER_DB_ENGINE 
+        QUALER_DB_ENGINE = create_engine(f"postgresql://{DATABASE_WRITE_USER}:{DATABASE_WRITE_PASSWORD}@{DATABASE_HOST}:{DATABASE_PORT}/{DATABASE_NAME}") 
+        logging.info('Success.')
+
+        return True 
+    except Exception as e: 
+        logging.error(f'DB connection UNSUCCESSFUL. {e}')
+        return False 
 
 
 
@@ -74,13 +84,11 @@ def execute_qualer_db_query(query):
 
         Returns -> Result of the query as a worksheet_df 
     ''' 
-
     query = text(query)
     # print(f"Calling execute_query function for query: {query}")
     data = pd.read_sql(query, QUALER_DB_ENGINE)
     
     return data
-
 
 
 
@@ -99,24 +107,26 @@ def fetch_input_data(today_date):
 
     return df
 
+
+
 def connect_to_gsheet():
-    # Authenticate using service account
-    gc = pygsheets.authorize(service_file='automate-daily-report-459818-784da1560980.json')
+    
+    logging.info('Connecting to Google Sheets.')
+    try:
+        gc = pygsheets.authorize(service_file='automate-daily-report-459818-784da1560980.json')         # Authenticate using service account
 
-    # Open the Google Sheet by name or URL
-    sheet = gc.open("Akash's Copy of Ops Huddle Scorecard 2025")  # OR: gc.open_by_url('URL_HERE')
+        spreadsheet = gc.open("Akash's Copy of Ops Huddle Scorecard 2025")  # OR: gc.open_by_url('URL_HERE') # Open the Google Sheet by name or URL
 
-    # Select the 2nd worksheet
-    wks = sheet[1]
+        wks = spreadsheet.worksheet('title', 'Oncology-Ops Huddle')
+        # wks = spreadsheet[1] # Select the 2nd worksheet
 
-    # Get all values as a list of lists
-    # data = wks.get_all_values()
+        worksheet_df = wks.get_as_df()
 
-    # OR get it as a pandas DataFrame
-    worksheet_df = wks.get_as_df()
-
-    return wks, worksheet_df 
-
+        logging.info('Success.')
+        return True, wks, worksheet_df 
+    except Exception as e:
+        logging.error(f"Google Sheets connection UNSUCCESSFUL. {e}")
+        return False, None, None 
 
 
 # seg_worksheet_df = worksheet_df[worksheet_df['Owner'] == 'Ian Advincula/James Grayson']
@@ -137,20 +147,41 @@ def connect_to_gsheet():
 
 
 def main():
-    connect_to_qualer_db()
-    wks, worksheet_df = connect_to_gsheet()
+
+    # Create and configure logger
+    log_message_format = '%(asctime)s %(message)s'
+    logging.basicConfig(filename='automate_daily_report.log', filemode = "a", format = log_message_format, level=logging.INFO)
+
+    db_connection_successful = connect_to_qualer_db()
+
+    if db_connection_successful is False:
+        return 
+
+
+    gheets_connection_successful, wks, worksheet_df = connect_to_gsheet()
+    
+    if gheets_connection_successful is False:
+        return 
+
+
     first_col = worksheet_df.columns[0] # Since first col doesn't have a name
     today_date = datetime.today()
 
     today_date = datetime(2025, 6, 4) # only for testing
 
-    input_df = fetch_input_data(today_date.strftime('%Y-%m-%d'))
+    input_df = []
+    data_fetch_successful = True 
 
-    print(input_df)
-
-    if len(input_df) != len(GSHEET_LINE_ITEMS):
-        print("Insufficient input data.")
-        # return 
+    try: 
+        logging.info("Fetching today's data from DB.")
+        input_df = fetch_input_data(today_date.strftime('%Y-%m-%d'))
+        logging.info("Success.")
+    except Exception as e:
+        logging.error(f"Data fetch UNSUCCESSFUL. {e}")
+        data_fetch_successful = False 
+    
+    if data_fetch_successful is False:
+        return 
 
 
     def get_row_index(gsheet_line_item):
@@ -178,18 +209,21 @@ def main():
 
     for item in GSHEET_LINE_ITEMS:
         row = get_row_index(item)
-        if row != -1:
+        if row == -1:
+            logging.warning(f"Could not locate '{item}' in Google sheet.")
+        else:
             try:
                 input_data = input_df.loc[item, 'utilized_capacity']
                 input_data = round((input_data * 100), 1)
                 print(f"Item : {item},    Data: {input_data},    Index: {row}")
-                
-                if 'Histology' not in item: 
-                    wks.  update_value(f"{col}{row}", f'{input_data}%')
 
-            except Exception as e:
-                print(e)
+                wks.update_value(f"{col}{row}", f'{input_data}%')
+
+            except Exception as e: 
+                logging.warning(f"Data missing for '{item}' in DB.")
+
 
 
 if __name__ == "__main__":
     main()
+    logging.info("--------------------------------------------------------------------------------------------------------------")
