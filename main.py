@@ -1,6 +1,12 @@
 
 '''
-    This script is to ... 
+    This script appends daily capacity data to the Oncology-Ops Huddle google sheet. This script is automatically run daily as a systemd service.
+
+    It does this by: 
+        1. Connects to the Google sheet to append the data to.
+        2. Connecting to DB which already has the required data.
+        3. Filters and fetches today's data from DB.
+        4. Adds data to necessary cells in the google sheet.
 
 '''
 
@@ -12,8 +18,6 @@ import pandas as pd
 import pygsheets
 from datetime import datetime, timedelta
 import logging 
-
-# logger = logging.getLogger(__name__)
 
 # Loading credentials from .env file 
 load_dotenv()
@@ -129,40 +133,25 @@ def connect_to_gsheet():
         return False, None, None 
 
 
-# seg_worksheet_df = worksheet_df[worksheet_df['Owner'] == 'Ian Advincula/James Grayson']
-
-
-# if today in seg_worksheet_df.columns:
-#     column_data = seg_worksheet_df[today]
-#     print(column_data)
-
-
-# Write a value to a specific cell
-# cell = f"{col_index}{row_index}"
-# wks.update_value("EN99", '90%')
-
-# Update multiple rows/columns
-# wks.update_values('A2:B3', [['Name', 'Age'], ['Alice', '25']])
-
-
 
 def main():
 
     # Create and configure logger
-    log_message_format = '%(asctime)s %(message)s'
-    logging.basicConfig(filename='automate_daily_report.log', filemode = "a", format = log_message_format, level=logging.INFO)
-
-    db_connection_successful = connect_to_qualer_db()
-
-    if db_connection_successful is False:
-        return 
-
+    logging.basicConfig(filename='automate_daily_report.log', 
+                        filemode = "a", 
+                        level=logging.INFO, 
+                        format = '%(asctime)s [%(levelname)s] %(message)s', )
 
     gheets_connection_successful, wks, worksheet_df = connect_to_gsheet()
     
     if gheets_connection_successful is False:
         return 
 
+
+    db_connection_successful = connect_to_qualer_db()
+
+    if db_connection_successful is False:
+        return 
 
     first_col = worksheet_df.columns[0] # Since first col doesn't have a name
     today_date = datetime.today()
@@ -193,8 +182,8 @@ def main():
         return -1
     
     
-    def get_col_index():
-        col_index = worksheet_df.columns.get_loc(today_date.strftime('%-m/%-d/%y')) # formatting date as M/DD/YY eg. '5/20/25'
+    def get_col_index(column_name):
+        col_index = worksheet_df.columns.get_loc(column_name)
         n = col_index
         result = ''
     
@@ -205,7 +194,8 @@ def main():
         return result
 
 
-    col = get_col_index() # Today's date's col. This is the column we want to append data to 
+    col = get_col_index(column_name = today_date.strftime('%-m/%-d/%y')) # Today's date's col. This is the column we want to append data to 
+    owner_col = get_col_index(column_name = 'Owner')
 
     for item in GSHEET_LINE_ITEMS:
         row = get_row_index(item)
@@ -215,9 +205,10 @@ def main():
             try:
                 input_data = input_df.loc[item, 'utilized_capacity']
                 input_data = round((input_data * 100), 1)
-                print(f"Item : {item},    Data: {input_data},    Index: {row}")
-
-                wks.update_value(f"{col}{row}", f'{input_data}%')
+                # print(f"Item : {item},    Data: {input_data},    Index: {row}")
+                owner = (wks.cell(f"{owner_col}{row}").value).strip()
+                if owner == "Ian Advincula/James Grayson":  # only update if owner is SEG 
+                    wks.update_value(f"{col}{row}", f'{input_data}%')
 
             except Exception as e: 
                 logging.warning(f"Data missing for '{item}' in DB.")
