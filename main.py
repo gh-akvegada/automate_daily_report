@@ -3,20 +3,19 @@
     This script appends daily capacity data to the Oncology-Ops Huddle google sheet. This script is automatically run daily as a systemd service.
 
     It does this by: 
-        1. Connects to the Google sheet to append the data to.
+        1. Connecting to the Google sheet to append the data to.
         2. Connecting to DB which already has the required data.
-        3. Filters and fetches today's data from DB.
-        4. Adds data to necessary cells in the google sheet.
+        3. Filtering and fetching today's data from DB.
+        4. Adding data to necessary cells in the google sheet.
 
 '''
 
-from concurrent.futures import ThreadPoolExecutor # for multi-threading
 from dotenv import load_dotenv # pip install python-dotenv
 import os
 from sqlalchemy import create_engine, text
 import pandas as pd 
 import pygsheets
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging 
 
 # Loading credentials from .env file 
@@ -86,7 +85,7 @@ def execute_qualer_db_query(query):
     '''
         This function exectues DB query provided to it. 
 
-        Returns -> Result of the query as a worksheet_df 
+        Returns -> Result of the query as a df 
     ''' 
     query = text(query)
     # print(f"Calling execute_query function for query: {query}")
@@ -97,6 +96,12 @@ def execute_qualer_db_query(query):
 
 
 def fetch_input_data(today_date):
+    '''
+        This function fetches data to be input in the google sheet.
+
+        Returns the data as a df. 
+    '''
+
     query = f"""
                 SELECT * 
                 FROM "capacity"."silver_capacity_output"
@@ -114,6 +119,14 @@ def fetch_input_data(today_date):
 
 
 def connect_to_gsheet():
+    '''
+        This function is used to create a connection to the google sheet we are trying to update. 
+
+        Returns: 
+            1. True if connection is successful, else False
+            2. worksheet if connection is successful, esle None 
+            3. wokrsheet_df if connection is successful, esle None 
+    '''
     
     logging.info('Connecting to Google Sheets.')
     try:
