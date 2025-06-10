@@ -29,39 +29,6 @@ DATABASE_WRITE_PASSWORD = os.getenv('DATABASE_WRITE_PASSWORD')
 QUALER_DB_ENGINE = None 
 
 
-GSHEET_LINE_ITEMS = [
-    'NextSeq 550 Utilization',
-    'NovaSeq 6000 Utilization',
-    'NovaSeq X+ Utilization',
-    'QiaSymphony Utilization',
-    'BSM Onco Liquid - Avanti J-15R Centrifuge',
-    'G360 CDX v2.11 STARlet Utilization',
-    'G360 CDX v2.11 STAR Utilization',
-    'G360 LDT STAR-PRE Utilization',
-    'G360 LDT STAR-POST Utilization',
-    'Reveal EP1 Pre-STAR Utilization',
-    'Reveal EP1 Post STAR Utilization',
-    'Tissue v2 AutoLys',
-    'Tissue v2 RNA STAR-Pre',
-    'Tissue v2 DNA STAR-Pre',
-    'Tissue v2 STAR-Post',
-    'Tissue v2 King Fisher - RNA',
-    'Tissue v2 King Fisher - DNA',
-    'Screening NovaSeq Utilization',
-    'Screening QiaSymphony Utilization',
-    'Screening EZ-Blood Utilization',
-    'Screening STAR-PRE Utilization',
-    'Screening STAR-POST Utilization',
-    'Histology - Sakura embedding station',
-    'Histology - Sakura Auto Stainer',
-    'Histology - Dako Auto Stainer',
-    'Histology - Leica Scanner',
-    'Histology - Leica Microtome',
-    'Histology - Olympus Microscope'
-]
-
-
-
 def connect_to_qualer_db():
     '''
         This function creates an engine to connect to DB. 
@@ -95,6 +62,28 @@ def execute_qualer_db_query(query):
 
 
 
+
+def fetch_unique_line_items():
+    '''
+        This function fetches unique gsheet line items such as 'Tissue v2 King Fisher - DNA', 'Screening NovaSeq Utilization', etc.
+
+        Returns the data as a list. 
+    '''
+    
+    query = f"""
+                SELECT DISTINCT 
+                    CASE 
+                        WHEN gsheet_line_item IS NULL THEN 'Missing Line Item'
+                        ELSE gsheet_line_item
+                    END AS gsheet_line_item
+                FROM "capacity"."silver_capacity_output";
+            """
+
+    df = execute_qualer_db_query(query)
+    df['gsheet_line_item'] = df['gsheet_line_item'].str.strip()
+    return df['gsheet_line_item'].values 
+
+
 def fetch_input_data(today_date):
     '''
         This function fetches data to be input in the google sheet.
@@ -124,8 +113,8 @@ def connect_to_gsheet():
 
         Returns: 
             1. True if connection is successful, else False
-            2. worksheet if connection is successful, esle None 
-            3. wokrsheet_df if connection is successful, esle None 
+            2. worksheet if connection is successful, else None 
+            3. wokrsheet_df if connection is successful, else None 
     '''
     
     logging.info('Connecting to Google Sheets.')
@@ -166,12 +155,25 @@ def main():
     if db_connection_successful is False:
         return 
 
-    first_col = worksheet_df.columns[0] # Since first col doesn't have a name
+    first_col = worksheet_df.columns[0] # Since first column in the google sheet doesn't have a proper name (only empty string)
     today_date = datetime.today()
 
-    today_date = datetime(2025, 6, 4) # only for testing
+    # today_date = datetime(2025, 6, 4) # only for testing
 
     input_df = []
+    
+    line_item_data_fetch_successful = True 
+    gsheet_line_items = []
+    try: 
+        gsheet_line_items = fetch_unique_line_items()
+    except Exception as e:
+        logging.error(f"Gsheet Line Itme data fetch UNSUCCESSFUL. {e}")
+        line_item_data_fetch_successful = False 
+
+
+    if line_item_data_fetch_successful is False:
+        return 
+
     data_fetch_successful = True 
 
     try: 
@@ -179,7 +181,7 @@ def main():
         input_df = fetch_input_data(today_date.strftime('%Y-%m-%d'))
         logging.info("Success.")
     except Exception as e:
-        logging.error(f"Data fetch UNSUCCESSFUL. {e}")
+        logging.error(f"Input Data fetch UNSUCCESSFUL. {e}")
         data_fetch_successful = False 
     
     if data_fetch_successful is False:
@@ -210,7 +212,8 @@ def main():
     col = get_col_index(column_name = today_date.strftime('%-m/%-d/%y')) # Today's date's col. This is the column we want to append data to 
     owner_col = get_col_index(column_name = 'Owner')
 
-    for item in GSHEET_LINE_ITEMS:
+    
+    for item in gsheet_line_items:
         row = get_row_index(item)
         if row == -1:
             logging.warning(f"Could not locate '{item}' in Google sheet.")
